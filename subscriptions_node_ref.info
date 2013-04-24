@@ -1,0 +1,9 @@
+name = Node Reference Subscriptions
+description = Allows users to subscribe to content via node references.
+package = "Subscriptions"
+
+dependencies[] = subscriptions
+dependencies[] = subscriptions_content
+dependencies[] = node_reference
+
+core = 7.x

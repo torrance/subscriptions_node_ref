@@ -1,0 +1,199 @@
+<?php
+
+/**
+ * Implements hook_subscriptions().
+ *
+ * @param $op
+ * @param null $arg0
+ * @param null $arg1
+ * @param null $arg2
+ *
+ * @return array|null
+ *
+ * @ingroup hooks
+ */
+function subscriptions_node_ref_subscriptions($op, $arg0 = NULL, $arg1 = NULL, $arg2 = NULL) {
+  switch ($op) {
+    case 'types':
+      $types = array();
+      foreach (_subscriptions_node_ref_get_fields() as $field) {
+        $types['node_ref_' . $field] = array(
+          'title' => variable_get('subscriptions_node_ref_name_' . $field, t('Related content')),
+          'page' => '_subscriptions_node_ref_page',
+          'fields' => array('node', 'node_ref_' . $field),
+          'weight' => -30,
+          'access' => 'subscribe to related content',
+          'permission' => array(
+            'title' => t('Subscribe to related content'),
+            'description' => t('Subscribe to related content via node reference.')
+          ),
+        );
+      }
+      return $types;
+    case 'queue':
+      // $arg0 is $event array.
+      $params = array();
+      if ($arg0['module'] == 'node') {
+        $node = $arg0['node'];
+        foreach (_subscriptions_node_ref_get_fields() as $field) {
+          $params['node']['node_ref_' . $field] = array(
+            'join' => array(
+              'table' => 'field_data_' . $field,
+              'alias' => 'node_ref',
+              'on' => "s.value = node_ref.{$field}_nid",
+            ),
+            'where' => array(
+              array('node_ref.entity_id', $node->nid, '='),
+              array('node_ref.entity_type', 'node', '='),
+            ),
+          );
+          if ($arg0['type'] == 'comment') {
+            $params['node']['node_ref_' . $field]['where'][] = array('s.send_comments', 1, '=');
+          }
+          elseif ($arg0['type'] == 'node' && $arg0['action'] == 'update') {
+            $params['node']['node_ref_' . $field]['where'][] = array('s.send_updates', 1, '=');
+          }
+        }
+      }
+      return $params;
+    case 'fields':
+      // $arg0 is module.
+      $fields = array();
+      if ($arg0 == 'node' || $arg0 == 'comment') {
+        foreach (_subscriptions_node_ref_get_fields() as $field) {
+          $fields['node_ref_' . $field] = array(
+            'data_function' => 'subscriptions_content_data',
+            'subs_mod' => 'subscriptions_node_ref',
+            'subs_type' => t('related content'),
+            'mailkey' => 'node-type-',
+          );
+        }
+      }
+      return $fields;
+    case 'node_options':
+      $options = array();
+      foreach (_subscriptions_node_ref_get_fields() as $field) {
+        // Determine if the content type is allowed to be subscribed to.
+        $allowed_content_types = variable_get("subscriptions_node_ref_types_{$field}", array());
+        if (!in_array($arg1->type, $allowed_content_types)) {
+          continue;
+        }
+
+        $options['node_ref_' . $field][] = array(
+          'name' => t('To content related to %name', array('%name' => $arg1->title)),
+          'link' => 'node/' . $arg1->nid,
+          'params' => array(
+            'module' => 'node',
+            'field' => 'node_ref_' . $field,
+            'value' => $arg1->nid,
+          ),
+        );
+      }
+      return $options;
+  }
+}
+
+/**
+ * Implements hook_form_FROM_ID_alter().
+ *
+ * Allow admin to decide which content types can be subscribed to, and via which node reference fields.
+ */
+function subscriptions_node_ref_form_subscriptions_settings_form_alter(&$form, &$form_state, $form_id) {
+  $node_types = array('<none>') + node_type_get_names();
+
+  $fields = _subscriptions_node_ref_get_fields();
+  foreach ($fields as $field) {
+    $form['node_reference_' . $field] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Node reference settings (%field)', array('%field' => $field)),
+      '#collapsible' => TRUE,
+      '#weight' => -8,
+    );
+    $form['node_reference_' . $field]['subscriptions_node_ref_name_' . $field] = array(
+      '#type' => 'textfield',
+      '#title' => 'Subscription name',
+      '#default_value' => variable_get('subscriptions_node_ref_name_' . $field, t('Related content')),
+      '#description' => t('The name of this subscription, eg. Related content. You will need to clear caches to see any change here reflected in menus and tabs.'),
+    );
+    $form['node_reference_' . $field]['subscriptions_node_ref_types_' . $field] = array(
+      '#type' => 'select',
+      '#title' => t("Enable subscriptions to these content types"),
+      '#default_value' => variable_get('subscriptions_node_ref_types_' . $field, array(0)),
+      '#options' => $node_types,
+      '#description' => t("Choose which content types can be subscribed to. Related content is determined using the node reference field %field.", array('%field' => $field)),
+      '#multiple' => TRUE,
+    );
+  }
+
+  if (empty($fields)) {
+    $form['node_reference']['empty'] = array(
+      '#markup' => t('You have no active node reference fields.'),
+    );
+  }
+}
+
+/**
+ * Subscriptions listing page callback.
+ *
+ * We only display active subscriptions — not all possible subscriptions.
+ */
+function _subscriptions_node_ref_page($form, $uid) {
+  // Load all active OG subscriptions for this user
+  $fields = _subscriptions_node_ref_get_fields();
+  foreach ($fields as $key => $field) {
+    $fields[$key] = 'node_ref_' . $field;
+  }
+
+  $query = db_select('subscriptions', 's');
+  $subs = $query
+    ->fields('s', array('value', 'send_interval', 'author_uid', 'send_comments', 'send_updates'))
+    ->condition('s.module', 'node')
+    ->condition('s.field', $fields)
+    ->condition('s.recipient_uid', $uid)
+    ->orderBy('s.author_uid')
+    ->execute()
+    ->fetchAllAssoc('value');
+
+  $nodes = node_load_multiple(array_keys($subs));
+
+  $form[0] = array(
+    '#theme' => 'subscriptions_form_table',
+  );
+
+  $defaults = array();
+  foreach ($nodes as $node) {
+    // Check that the user is allowed to view this node.
+    if (!node_access('view', $node)) {
+      continue;
+    }
+    $sub = (array) $subs[$node->nid];
+    subscriptions_form_helper($form[0], $defaults, $sub['author_uid'], $node->nid, check_plain($node->title), $sub);
+  }
+
+  if (isset($form[0]['checkboxes'])) {
+    $form[0]['defaults'] = array(
+      '#type' => 'value',
+      '#value' => $defaults,
+    );
+    subscriptions_form_column_filter($form[0], $uid);
+  }
+  else {
+    $form = array(
+      array('#markup' => t('You have not subscribed to any content.'))
+    );
+  }
+
+  return $form;
+}
+
+/**
+ * Helper function: get the machine names of all node_reference fields.
+ */
+function _subscriptions_node_ref_get_fields() {
+  $fields = &drupal_static(__FUNCTION__);
+  if (!isset($fields)) {
+    $fields = db_query("SELECT field_name FROM field_config WHERE active = 1 AND module = 'node_reference'")
+      ->fetchCol();
+  } 
+  return $fields;
+}
