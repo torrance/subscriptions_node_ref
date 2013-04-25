@@ -118,7 +118,7 @@ function subscriptions_node_ref_form_subscriptions_settings_form_alter(&$form, &
     $form['node_reference_' . $field]['subscriptions_node_ref_types_' . $field] = array(
       '#type' => 'select',
       '#title' => t("Enable subscriptions to these content types"),
-      '#default_value' => variable_get('subscriptions_node_ref_types_' . $field, array(0)),
+      '#default_value' => variable_get('subscriptions_node_ref_types_' . $field, array()),
       '#options' => $node_types,
       '#description' => t("Choose which content types can be subscribed to. Related content is determined using the node reference field %field.", array('%field' => $field)),
       '#multiple' => TRUE,
