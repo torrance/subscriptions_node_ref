@@ -65,7 +65,7 @@ function subscriptions_node_ref_subscriptions($op, $arg0 = NULL, $arg1 = NULL, $
             'data_function' => 'subscriptions_content_data',
             'subs_mod' => 'subscriptions_node_ref',
             'subs_type' => t('related content'),
-            'mailkey' => 'node-type-',
+            'mailkey' => 'node-ref-',
           );
         }
       }
@@ -90,6 +90,24 @@ function subscriptions_node_ref_subscriptions($op, $arg0 = NULL, $arg1 = NULL, $
         );
       }
       return $options;
+    case 'mailkeys':
+      $mailkeys = array();
+      $fields = _subscriptions_node_ref_get_fields();
+      foreach ($fields as $field) {
+        $mailkeys['node-ref-' . $field] = t('Notifications for related content (using node reference field %field)', array('%field' => $field));
+      }
+      return $mailkeys;
+    case 'mailkey_alter':
+      if ($arg0 == 'node-ref-') {
+        $field = substr($arg2['field'], 9); // Remove 'node_ref_' from the start
+        return $arg0 . $field;
+      }
+      break;
+    case 'token_types':
+      if (strpos($arg0, 'node-ref-') === 0) {
+        return array('node', 'comment');
+      }
+      break;
   }
 }
 
