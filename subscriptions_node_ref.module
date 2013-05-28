@@ -16,18 +16,24 @@ function subscriptions_node_ref_subscriptions($op, $arg0 = NULL, $arg1 = NULL, $
   switch ($op) {
     case 'types':
       $types = array();
+
       foreach (_subscriptions_node_ref_get_fields() as $field) {
-        $types['node_ref_' . $field] = array(
-          'title' => variable_get('subscriptions_node_ref_name_' . $field, t('Related content')),
-          'page' => '_subscriptions_node_ref_page',
-          'fields' => array('node', 'node_ref_' . $field),
-          'weight' => -30,
-          'access' => 'subscribe to related content',
-          'permission' => array(
-            'title' => t('Subscribe to related content'),
-            'description' => t('Subscribe to related content via node reference.')
-          ),
-        );
+        // We treat this node reference subscription as disabled if no content types
+        // can be subscribed to.
+        $allowed_content_types = variable_get("subscriptions_node_ref_types_{$field}", array());
+        if ($allowed_content_types != array() && $allowed_content_types != array(0)) {
+          $types['node_ref_' . $field] = array(
+            'title' => variable_get('subscriptions_node_ref_name_' . $field, t('Related content')),
+            'page' => '_subscriptions_node_ref_page',
+            'fields' => array('node', 'node_ref_' . $field),
+            'weight' => -30,
+            'access' => 'subscribe to related content',
+            'permission' => array(
+              'title' => t('Subscribe to related content'),
+              'description' => t('Subscribe to related content via node reference.')
+            ),
+          );
+        }
       }
       return $types;
     case 'queue':
